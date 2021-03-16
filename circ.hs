@@ -1,6 +1,8 @@
 import Data.Maybe
 
 
+-- random helper functions
+
 zipPartial :: [a] -> [b] -> [(a,b)]
 zipPartial [] [] = []
 zipPartial (x:xr) (y:yr) = (x,y):(zipPartial xr yr)
@@ -36,8 +38,12 @@ boolsToInt [] = 0
 boolsToInt (h:t) = (if h then (2^(length t)) else 0) + (boolsToInt t)
 
 
+-- combinatorial circuit
+
 data CombCircuit = GND | NAND | NET [(CombCircuit,[String],[String])] [String] [String] deriving Show
 
+
+-- evaluating combinatorial circuits
 
 evalNet :: [(String,Bool)] -> [String] -> [(CombCircuit,[String],[String])] -> [Bool]
 evalNet env otps [] = mapLookupPartial otps env
@@ -50,6 +56,8 @@ evalComb GND [] = [False]
 evalComb NAND (a:(b:[])) = [not (a && b)]
 evalComb (NET elems inpNames otps) inpVals = evalNet (zipPartial inpNames inpVals) otps elems
 
+
+-- truth table stuff
 
 makeFnTruthTable :: ([Bool] -> [Bool]) -> Int -> [([Bool],[Bool])]
 makeFnTruthTable f n = zipPartial cnt $ map f cnt where cnt = boolCounter n
@@ -67,6 +75,8 @@ checkBehavior :: CombCircuit -> ([Bool] -> [Bool]) -> Int -> Bool
 checkBehavior c f n = and $ map (\(a,b) -> a == b) $ zipPartial (makeTruthTable c n) (makeFnTruthTable f n)
 
 
+-- gate utilities
+
 comp :: CombCircuit -> CombCircuit -> Int -> Int -> Int -> CombCircuit
 comp c1 c2 n1 n2 n3 = NET [(c1,v1,v2),(c2,v2,v3)] v1 v3 where
   v1 = countToPrefixed "a" n1
@@ -74,6 +84,8 @@ comp c1 c2 n1 n2 n3 = NET [(c1,v1,v2),(c2,v2,v3)] v1 v3 where
   v3 = countToPrefixed "c" n3
 
 -- only use on monoid 2-input gates
+-- does a thing like ((A + B) + C) + D
+-- n is number of inputs
 combN :: CombCircuit -> Int -> CombCircuit
 combN c 2 = c
 combN c n = NET [(cc,v,["b"]),(c,["x","b"],["c"])] i ["c"] where
@@ -81,12 +93,16 @@ combN c n = NET [(cc,v,["b"]),(c,["x","b"],["c"])] i ["c"] where
   v = countToPrefixed "a" (n-1)
   i = "x":v
 
+-- does bitwise combination
 combNIndividually :: CombCircuit -> Int -> CombCircuit
 combNIndividually c 1 = c
 combNIndividually c n = NET [(c,["a","b"],["c"]),(combNIndividually c (n-1),i1++i2,o)] (["a"]++i1++["b"]++i2) ("c":o) where
   i1 = countToPrefixed "a" (n-1)
   i2 = countToPrefixed "b" (n-1)
   o =  countToPrefixed "o" (n-1)
+
+
+-- basic logic gates
 
 inv :: CombCircuit
 inv = NET [(NAND,["a","a"],["na"])] ["a"] ["na"]
@@ -108,12 +124,14 @@ constN bs = NET c [] o where
   o = countToPrefixed "o" $ length bs
   c = map (\(b,n) -> (const1 b,[],[n])) $ zipPartial bs o
 
+-- feed values into a circuit, optionally having some remaining arguments put on end
 feedVals :: CombCircuit -> [Bool] -> Int -> Int -> CombCircuit
 feedVals c bs remaining outNum = NET [(constN bs,[],v1),(c,v1++v2,v3)] v2 v3 where
   v1 = countToPrefixed "a" $ length bs
   v2 = countToPrefixed "b" remaining
   v3 = countToPrefixed "o" outNum
 
+-- ditto but remaining arguments put at beginning
 feedValsEnd :: CombCircuit -> [Bool] -> Int -> Int -> CombCircuit
 feedValsEnd c bs remaining outNum = NET [(constN bs,[],v1),(c,v2++v1,v3)] v2 v3 where
   v1 = countToPrefixed "a" $ length bs
@@ -156,6 +174,9 @@ xnorN n = comp (xorN n) inv n 1 1
 xnor2 :: CombCircuit
 xnor2 = xnorN 2
 
+
+-- multiplexers
+
 mux1_1 :: CombCircuit
 mux1_1 = NET [(inv,["s"],["ns"]),(and2,["a","ns"],["c1"]),(and2,["b","s"],["c2"]),(or2,["c1","c2"],["c"])] ["s","a","b"] ["c"]
 
@@ -179,6 +200,8 @@ muxN_N n m = NET muxes (sels++inps) otps where
   otps = countToPrefixed "o" m
   
 
+-- equality checker
+
 eqN :: Int -> CombCircuit
 eqN n = comp (combNIndividually xnor2 n) (andN n) (n+n) n 1
 
@@ -186,10 +209,13 @@ eqToN :: [Bool] -> CombCircuit
 eqToN bs = feedVals (eqN n) bs n 1 where n = length bs
 
 
+-- arbitrary boolean logic to combinatorial circuit
+
 produceBehavior :: ([Bool] -> [Bool]) -> Int -> Int -> CombCircuit
 produceBehavior f inl outl = feedValsEnd (muxN_N inl outl) (concat $ map snd $ makeFnTruthTable f inl) inl outl
 
 
+-- test behaviors
 and2_Behavior :: [Bool] -> [Bool]
 and2_Behavior (a:(b:[])) = [a && b]
 
@@ -200,7 +226,7 @@ muxN_N_Behavior n m inp = otp where
   nthStr nn = take m $ drop (nn * m) vals
   otp = nthStr $ boolsToInt sel
 
-
+-- make sure produceBehavior works
 check_produceBehavior :: CombCircuit -> Int -> Int -> Bool
 check_produceBehavior c inl outl = (makeTruthTable c inl) == (makeTruthTable (produceBehavior (evalComb c) inl outl) inl)
 
